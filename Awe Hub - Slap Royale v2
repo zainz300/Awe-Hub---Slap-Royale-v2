@@ -18,6 +18,7 @@ _G.Glove = false
 _G.Kills = false
 _G.Power = false
 _G.Speed = false
+_G.SpeedValue = 0
 _G.JumpPower = false
 _G.Health = false
 _G.SlapAura = false
@@ -79,7 +80,9 @@ local ConfigData = {
 	ItemsESP = false,
 	GloveESP = false,
 	AutoCollect = false,
+	AutoCollectItemsToggle = false,
 	SelectedAutoCollectItem = "Apple",
+	GetItemsForAutoBombBus = false,
 	SlowGetItems = false,
 	AutoUseItems = false,
 	AutoBombBus = false,
@@ -119,11 +122,26 @@ local function LoadConfig()
 end
 
 LoadConfig()
+_G.SpeedValue = ConfigData.SpeedValue
 
 -- RayParams for Safe TP Logic
 local RayParams = RaycastParams.new()
 RayParams.FilterDescendantsInstances = {character}
 RayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+-- Check if player currently has a glove equipped
+local function IsHoldingGlove()
+	local char = player.Character
+	if not char then return false end
+	local tool = char:FindFirstChildOfClass("Tool")
+	if tool and (tool.Name:lower():find("glove") or tool:FindFirstChild("Glove") or tool:GetAttribute("IsGlove")) then
+		return true
+	end
+	if tool and tool.Name ~= "Apple" and tool.Name ~= "Bandage" and tool.Name ~= "Bomb" and tool.Name ~= "Tomahawk" then
+		return true
+	end
+	return false
+end
 
 local function PumpkinSafeTP(targetPart)
 	local char = player.Character
@@ -182,6 +200,13 @@ function Combat.GetSlapRemote()
 	return nil
 end
 
+local function GetValidSlapTarget(p1)
+	return p1:FindFirstChild("Right Arm") or p1:FindFirstChild("RightHand")
+		or p1:FindFirstChild("HumanoidRootPart") or p1:FindFirstChild("Torso")
+		or p1:FindFirstChild("UpperTorso")
+end
+
+local slapCooldowns = {}
 function Combat.StartSlapAura()
 	if Combat.SlapAuraThread then
 		return
@@ -191,17 +216,22 @@ function Combat.StartSlapAura()
 			local remote = Combat.GetSlapRemote()
 			local localCharacter = player.Character
 			local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
+			local currentTime = tick()
 			if remote and localRoot then
 				for _, targetPlayer in ipairs(Players:GetPlayers()) do
 					if targetPlayer ~= player then
 						local targetCharacter = targetPlayer.Character
 						local targetRoot = targetCharacter and targetCharacter:FindFirstChild("HumanoidRootPart")
 						local hum = targetCharacter and targetCharacter:FindFirstChildOfClass("Humanoid")
-						if targetRoot and hum and hum.Health > 0 then
+						local v17 = GetValidSlapTarget(targetCharacter)
+						if targetRoot and hum and hum.Health > 0 and v17 then
 							if (localRoot.Position - targetRoot.Position).Magnitude <= Combat.SlapAuraRange then
-								pcall(function()
-									remote:FireServer(targetRoot)
-								end)
+								if not slapCooldowns[targetPlayer] or currentTime - slapCooldowns[targetPlayer] >= 2.4 then
+									slapCooldowns[targetPlayer] = currentTime
+									pcall(function()
+										remote:FireServer(v17)
+									end)
+								end
 							end
 						end
 					end
@@ -450,6 +480,7 @@ ConfigTab:Button({
 	Desc = "Reloads configuration from file",
 	Callback = function()
 		LoadConfig()
+		_G.SpeedValue = ConfigData.SpeedValue
 		Notification("Config", "Configuration reloaded.", 4, "bird")
 	end
 })
@@ -695,6 +726,7 @@ PlayerMods:Slider({
 	Value = { Min = 1, Max = 12, Default = ConfigData.SpeedValue },
 	Callback = function(Value)
 		ConfigData.SpeedValue = tonumber(Value) or 0
+		_G.SpeedValue = tonumber(Value) or 0
 		SaveConfig()
 	end
 })
@@ -836,7 +868,7 @@ PlayerMods:Toggle({
 UserInputService.JumpRequest:Connect(function()
 	if ConfigData.InfiniteJump then
 		local char = player.Character
-		local hum = char and char:FindFirstChild("Humanoid")
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		if hum then
 			hum:ChangeState(Enum.HumanoidStateType.Jumping)
 		end
@@ -1003,7 +1035,12 @@ CombatTab:Toggle({
 				while ConfigData.KillPlayer do
 					local targetP = TargetPlayerName and Players:FindFirstChild(TargetPlayerName)
 					if targetP and targetP.Character and targetP.Character:FindFirstChild("HumanoidRootPart") then
-						PumpkinSafeTP(targetP.Character.HumanoidRootPart)
+						local targetHrp = targetP.Character.HumanoidRootPart
+						local char = player.Character
+						local hrp = char and char:FindFirstChild("HumanoidRootPart")
+						if hrp then
+							hrp.CFrame = targetHrp.CFrame * CFrame.new(0, 0, 4)
+						end
 						task.wait(0.5)
 					else
 						task.wait(1)
@@ -1029,7 +1066,7 @@ local TPPlayerDropdown = CombatTab:Dropdown({
 
 CombatTab:Button({
 	Title = "Teleport to Selected Player",
-	Desc = "Instantly teleports you safely near the chosen player",
+	Desc = "Instantly teleports you 4 studs behind the chosen player",
 	Locked = false,
 	Callback = function()
 		pcall(function()
@@ -1039,8 +1076,13 @@ CombatTab:Button({
 			end
 			local targetP = Players:FindFirstChild(SelectedTPPlayerName)
 			if targetP and targetP.Character and targetP.Character:FindFirstChild("HumanoidRootPart") then
-				PumpkinSafeTP(targetP.Character.HumanoidRootPart)
-				Notification("Teleport", "Teleported to " .. targetP.Name, 3, "bird")
+				local targetHrp = targetP.Character.HumanoidRootPart
+				local char = player.Character
+				local hrp = char and char:FindFirstChild("HumanoidRootPart")
+				if hrp then
+					hrp.CFrame = targetHrp.CFrame * CFrame.new(0, 0, 4)
+					Notification("Teleport", "Teleported behind " .. targetP.Name, 3, "bird")
+				end
 			else
 				Notification("Teleport", "Target player is invalid or dead.", 3, "bird")
 			end
@@ -1103,7 +1145,7 @@ CombatTab:Divider()
 
 CombatTab:Toggle({
 	Title = "Slap Aura",
-	Desc = "Automatically slaps players within range",
+	Desc = "Automatically slaps players within range (Only works when holding a glove)",
 	Icon = "bird",
 	Type = "Checkbox",
 	Value = ConfigData.SlapAura,
@@ -1266,7 +1308,6 @@ Immunites:Toggle({
 	end
 })
 
--- Added Anti Underground Barriers Toggle
 Immunites:Toggle({
 	Title = "Anti Underground Barriers",
 	Desc = "Disables collisions and touch for underground barriers",
@@ -1712,7 +1753,7 @@ local itemValues = {
 
 Game:Dropdown({
 	Title = "Auto Collect Item Selection",
-	Desc = "Choose which item to automatically collect",
+	Desc = "Choose which item to automatically collect (⚠️ Witch Brew only available during Halloween 🎃)",
 	Values = itemValues,
 	Value = ConfigData.SelectedAutoCollectItem,
 	Callback = function(Selected)
@@ -1722,12 +1763,13 @@ Game:Dropdown({
 })
 
 Game:Toggle({
-	Title = "Auto Collect",
-	Desc = "Automatically collects items around the map",
+	Title = "Auto Collect Items",
+	Desc = "Automatically collects items around the map based on selection",
 	Icon = "bird",
 	Type = "Checkbox",
-	Value = ConfigData.AutoCollect,
+	Value = ConfigData.AutoCollectItemsToggle,
 	Callback = function(Value)
+		ConfigData.AutoCollectItemsToggle = Value
 		ConfigData.AutoCollect = Value
 		SaveConfig()
 	end
