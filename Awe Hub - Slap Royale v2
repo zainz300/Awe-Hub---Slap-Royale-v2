@@ -129,7 +129,7 @@ local RayParams = RaycastParams.new()
 RayParams.FilterDescendantsInstances = {character}
 RayParams.FilterType = Enum.RaycastFilterType.Exclude
 
--- Check if player currently has a glove equipped
+-- Check if player currently has a glove equipped (from second script addition)
 local function IsHoldingGlove()
 	local char = player.Character
 	if not char then return false end
@@ -200,13 +200,6 @@ function Combat.GetSlapRemote()
 	return nil
 end
 
-local function GetValidSlapTarget(p1)
-	return p1:FindFirstChild("Right Arm") or p1:FindFirstChild("RightHand")
-		or p1:FindFirstChild("HumanoidRootPart") or p1:FindFirstChild("Torso")
-		or p1:FindFirstChild("UpperTorso")
-end
-
-local slapCooldowns = {}
 function Combat.StartSlapAura()
 	if Combat.SlapAuraThread then
 		return
@@ -216,22 +209,17 @@ function Combat.StartSlapAura()
 			local remote = Combat.GetSlapRemote()
 			local localCharacter = player.Character
 			local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
-			local currentTime = tick()
 			if remote and localRoot then
 				for _, targetPlayer in ipairs(Players:GetPlayers()) do
 					if targetPlayer ~= player then
 						local targetCharacter = targetPlayer.Character
 						local targetRoot = targetCharacter and targetCharacter:FindFirstChild("HumanoidRootPart")
 						local hum = targetCharacter and targetCharacter:FindFirstChildOfClass("Humanoid")
-						local v17 = GetValidSlapTarget(targetCharacter)
-						if targetRoot and hum and hum.Health > 0 and v17 then
+						if targetRoot and hum and hum.Health > 0 then
 							if (localRoot.Position - targetRoot.Position).Magnitude <= Combat.SlapAuraRange then
-								if not slapCooldowns[targetPlayer] or currentTime - slapCooldowns[targetPlayer] >= 2.4 then
-									slapCooldowns[targetPlayer] = currentTime
-									pcall(function()
-										remote:FireServer(v17)
-									end)
-								end
+								pcall(function()
+									remote:FireServer(targetRoot)
+								end)
 							end
 						end
 					end
@@ -974,9 +962,6 @@ PlayerMods:Toggle({
 	end
 })
 
--- ==========================================================
--- TELEPORT & KILL TARGET SELECTION WITH AUTO-CLEANUP
--- ==========================================================
 local TargetPlayerName = nil
 local SelectedTPPlayerName = nil
 local KillPlayerRunning = false
@@ -1035,12 +1020,7 @@ CombatTab:Toggle({
 				while ConfigData.KillPlayer do
 					local targetP = TargetPlayerName and Players:FindFirstChild(TargetPlayerName)
 					if targetP and targetP.Character and targetP.Character:FindFirstChild("HumanoidRootPart") then
-						local targetHrp = targetP.Character.HumanoidRootPart
-						local char = player.Character
-						local hrp = char and char:FindFirstChild("HumanoidRootPart")
-						if hrp then
-							hrp.CFrame = targetHrp.CFrame * CFrame.new(0, 0, 4)
-						end
+						PumpkinSafeTP(targetP.Character.HumanoidRootPart)
 						task.wait(0.5)
 					else
 						task.wait(1)
@@ -1066,7 +1046,7 @@ local TPPlayerDropdown = CombatTab:Dropdown({
 
 CombatTab:Button({
 	Title = "Teleport to Selected Player",
-	Desc = "Instantly teleports you 4 studs behind the chosen player",
+	Desc = "Instantly teleports you safely near the chosen player",
 	Locked = false,
 	Callback = function()
 		pcall(function()
@@ -1076,13 +1056,8 @@ CombatTab:Button({
 			end
 			local targetP = Players:FindFirstChild(SelectedTPPlayerName)
 			if targetP and targetP.Character and targetP.Character:FindFirstChild("HumanoidRootPart") then
-				local targetHrp = targetP.Character.HumanoidRootPart
-				local char = player.Character
-				local hrp = char and char:FindFirstChild("HumanoidRootPart")
-				if hrp then
-					hrp.CFrame = targetHrp.CFrame * CFrame.new(0, 0, 4)
-					Notification("Teleport", "Teleported behind " .. targetP.Name, 3, "bird")
-				end
+				PumpkinSafeTP(targetP.Character.HumanoidRootPart)
+				Notification("Teleport", "Teleported to " .. targetP.Name, 3, "bird")
 			else
 				Notification("Teleport", "Target player is invalid or dead.", 3, "bird")
 			end
@@ -1145,7 +1120,7 @@ CombatTab:Divider()
 
 CombatTab:Toggle({
 	Title = "Slap Aura",
-	Desc = "Automatically slaps players within range (Only works when holding a glove)",
+	Desc = "Automatically slaps players within range",
 	Icon = "bird",
 	Type = "Checkbox",
 	Value = ConfigData.SlapAura,
@@ -1463,9 +1438,6 @@ Immunites:Toggle({
 	end
 })
 
--- ==========================================================
--- FLY INTEGRATION WITH UP/DOWN (E/Q & UI BUTTONS)
--- ==========================================================
 local FlyVectorForce = Instance.new("VectorForce")
 FlyVectorForce.Attachment0 = humanoidrootpart:WaitForChild("RootAttachment")
 FlyVectorForce.ApplyAtCenterOfMass = true
@@ -1604,9 +1576,6 @@ MobilityTab:Toggle({
 	end
 })
 
--- ==========================================================
--- INSTANT CHAIN INTEGRATION FROM NEXER SCRIPT
--- ==========================================================
 ObtainmentTab:Button({
 	Title = "Instant Chain",
 	Desc = "Automatically solves the puzzle to get Chain glove",
