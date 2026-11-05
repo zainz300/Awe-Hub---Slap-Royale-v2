@@ -129,7 +129,7 @@ local RayParams = RaycastParams.new()
 RayParams.FilterDescendantsInstances = {character}
 RayParams.FilterType = Enum.RaycastFilterType.Exclude
 
--- Check if player currently has a glove equipped (from second script addition)
+-- Check if player currently has a glove equipped
 local function IsHoldingGlove()
 	local char = player.Character
 	if not char then return false end
@@ -670,31 +670,33 @@ Game:Button({
 	end
 })
 
-local connection
+-- Walkspeed Logic using Velocity + RootPart and max 25
+local speedConnection = nil
 PlayerMods:Toggle({
 	Title = "WalkSpeed",
-	Desc = "Increases your speed",
+	Desc = "Increases your speed using velocity + rootpart",
 	Icon = "bird",
 	Type = "Checkbox",
 	Value = ConfigData.WalkSpeed,
 	Callback = function(Value)
 		ConfigData.WalkSpeed = Value
+		_G.Speed = Value
 		SaveConfig()
-		if connection then
-			connection:Disconnect()
-			connection = nil
+		if speedConnection then
+			speedConnection:Disconnect()
+			speedConnection = nil
 		end
 		if Value then
-			connection = RunService.Heartbeat:Connect(function()
+			speedConnection = RunService.Heartbeat:Connect(function()
 				local character = player.Character
 				local hrp = character and character:FindFirstChild("HumanoidRootPart")
-				local hum = character and character:FindFirstChildOfClass("Humanoid")
-				if not character or character:GetAttribute("Ragdolled") or not hrp or not hum then return end
-				local move = hum.MoveDirection
+				local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+				if not character or character:GetAttribute("Ragdolled") or not hrp or not humanoid then return end
+				local move = humanoid.MoveDirection
 				if move.Magnitude <= 0 then return end
 				local velocity = hrp.AssemblyLinearVelocity
 				local horizontal = Vector3.new(velocity.X, 0, velocity.Z)
-				local speed = hum.WalkSpeed + (tonumber(ConfigData.SpeedValue) or 0)
+				local speed = humanoid.WalkSpeed + (tonumber(_G.SpeedValue) or 0)
 				if horizontal.Magnitude > speed then
 					horizontal = horizontal.Unit * speed
 					hrp.AssemblyLinearVelocity = Vector3.new(horizontal.X, velocity.Y, horizontal.Z)
@@ -709,9 +711,9 @@ PlayerMods:Toggle({
 
 PlayerMods:Slider({
 	Title = "WalkSpeed Value",
-	Desc = "",
+	Desc = "Adjust speed value up to 25",
 	Step = 1,
-	Value = { Min = 1, Max = 12, Default = ConfigData.SpeedValue },
+	Value = { Min = 1, Max = 25, Default = ConfigData.SpeedValue },
 	Callback = function(Value)
 		ConfigData.SpeedValue = tonumber(Value) or 0
 		_G.SpeedValue = tonumber(Value) or 0
@@ -856,7 +858,7 @@ PlayerMods:Toggle({
 UserInputService.JumpRequest:Connect(function()
 	if ConfigData.InfiniteJump then
 		local char = player.Character
-		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local hum = char and char:FindFirstChild("Humanoid")
 		if hum then
 			hum:ChangeState(Enum.HumanoidStateType.Jumping)
 		end
