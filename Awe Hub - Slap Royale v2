@@ -836,7 +836,7 @@ PlayerMods:Toggle({
 UserInputService.JumpRequest:Connect(function()
 	if ConfigData.InfiniteJump then
 		local char = player.Character
-		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local hum = char and char:FindFirstChild("Humanoid")
 		if hum then
 			hum:ChangeState(Enum.HumanoidStateType.Jumping)
 		end
@@ -1407,7 +1407,7 @@ Immunites:Toggle({
 					local hpPercent = (hum.Health / hum.MaxHealth) * 100
 					if hpPercent < 60 then
 						for _, item in ipairs(backpack:GetChildren()) do
-							if item:IsA("Tool") and (item.Name == "Apple" or item.Name == "Bandage" or item.Name == "First Aid Kit" or item.Name == "Healing Potion") then
+							if item:IsA("Tool") and (item.Name == "Apple" or item.Name == "Bandage" or item.Name == "First Aid Kit" or item.Name == "Healing Potion" or item.Name == "Witch Brew") then
 								item.Parent = char
 								pcall(function() item:Activate() end)
 								task.wait(0.5)
@@ -1575,10 +1575,22 @@ ObtainmentTab:Button({
 		pcall(function()
 			local codeList = {}
 			pcall(function()
-				if workspace.Map.CodeBrick.SurfaceGui:FindFirstChild('IMGTemplate') then
-					for _, v in pairs(workspace.Map.CodeBrick.SurfaceGui:GetChildren()) do
+				local map = workspace:FindFirstChild("Map")
+				local codeBrick = map and map:FindFirstChild("CodeBrick")
+				local surfaceGui = codeBrick and codeBrick:FindFirstChild("SurfaceGui")
+				if surfaceGui then
+					for _, v in pairs(surfaceGui:GetChildren()) do
 						if v.Name == 'IMGTemplate' then
-							if v.Image:find('9648769161') then
+							local assetId = tostring(v.Image):match("rbxassetid://(%d+)") or tostring(v.Image):match("(%d+)$")
+							local codes = {
+								["9648755440"] = "8", ["9648765536"] = "2", ["9648723237"] = "3", ["9648718450"] = "6",
+								["9648769161"] = "4", ["9648730082"] = "6", ["9648734698"] = "2", ["9648712563"] = "2",
+								["9648742013"] = "7", ["9648745618"] = "3", ["9648715920"] = "6", ["9648752438"] = "2",
+								["9648749145"] = "8", ["9648759883"] = "9", ["9648738553"] = "8"
+							}
+							if assetId and codes[assetId] then
+								table.insert(codeList, codes[assetId])
+							elseif v.Image:find('9648769161') then
 								table.insert(codeList, '4')
 							end
 						end
@@ -1588,24 +1600,27 @@ ObtainmentTab:Button({
 
 			WindUI:Notify({Title = "Getting Chain...", Content = "Please wait...", Duration = 2, Icon = "triangle-exclamation"})
 			
-			for _, v3 in pairs(workspace.Map.OriginOffice:GetChildren()) do
-				if v3.Name:lower():find('codedoor') and v3:FindFirstChild('Door') then
-					local keypad = v3.Door:FindFirstChild('Keypad')
-					if keypad and keypad:FindFirstChild('Buttons') then
-						local buttons = keypad.Buttons
-						if buttons:FindFirstChild("Reset") and buttons.Reset:FindFirstChild("ClickDetector") then
-							fireclickdetector(buttons.Reset.ClickDetector)
-							task.wait(0.333)
-						end
-						for _, digit in ipairs(codeList) do
-							if buttons:FindFirstChild(digit) and buttons[digit]:FindFirstChild("ClickDetector") then
-								fireclickdetector(buttons[digit].ClickDetector)
+			local originOffice = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("OriginOffice")
+			if originOffice then
+				for _, v3 in pairs(originOffice:GetChildren()) do
+					if v3.Name:lower():find('codedoor') and v3:FindFirstChild('Door') then
+						local keypad = v3.Door:FindFirstChild('Keypad')
+						if keypad and keypad:FindFirstChild('Buttons') then
+							local buttons = keypad.Buttons
+							if buttons:FindFirstChild("Reset") and buttons.Reset:FindFirstChild("ClickDetector") then
+								fireclickdetector(buttons.Reset.ClickDetector)
 								task.wait(0.333)
 							end
-						end
-						if buttons:FindFirstChild("Enter") and buttons.Enter:FindFirstChild("ClickDetector") then
-							task.wait(0.333)
-							fireclickdetector(buttons.Enter.ClickDetector)
+							for _, digit in ipairs(codeList) do
+								if buttons:FindFirstChild(digit) and buttons[digit]:FindFirstChild("ClickDetector") then
+									fireclickdetector(buttons[digit].ClickDetector)
+									task.wait(0.333)
+								end
+							end
+							if buttons:FindFirstChild("Enter") and buttons.Enter:FindFirstChild("ClickDetector") then
+								task.wait(0.333)
+								fireclickdetector(buttons.Enter.ClickDetector)
+							end
 						end
 					end
 				end
@@ -1692,7 +1707,7 @@ ESP:Divider()
 local itemValues = {
 	"Apple", "Bandage", "Bomb", "Bull's Essence", "Frog Potion", "Boba", "Speed Potion",
 	"True Power", "Tomahawk", "Force Field Crystal", "Sphere of Fury", "Medkit",
-	"Lightning Potion", "Healing Potion", "Strength Potion", "Cube of Ice"
+	"Lightning Potion", "Healing Potion", "Strength Potion", "Cube of Ice", "Witch Brew"
 }
 
 Game:Dropdown({
@@ -1714,6 +1729,18 @@ Game:Toggle({
 	Value = ConfigData.AutoCollect,
 	Callback = function(Value)
 		ConfigData.AutoCollect = Value
+		SaveConfig()
+	end
+})
+
+Game:Toggle({
+	Title = "Get items for auto bomb bus",
+	Desc = "Gets items specifically required for auto bomb bus",
+	Icon = "bird",
+	Type = "Checkbox",
+	Value = ConfigData.GetItemsForAutoBombBus,
+	Callback = function(Value)
+		ConfigData.GetItemsForAutoBombBus = Value
 		SaveConfig()
 	end
 })
@@ -1787,6 +1814,7 @@ local itemColors = {
 	["Frog Potion"] = Color3.fromRGB(30, 144, 255),
 	["Boba"] = Color3.fromRGB(255, 255, 150),
 	["Speed Potion"] = Color3.fromRGB(255, 255, 0),
+	["Witch Brew"] = Color3.fromRGB(148, 0, 211),
 }
 
 RunService.RenderStepped:Connect(function()
@@ -1950,6 +1978,34 @@ task.spawn(function()
 				end
 			end)
 		end
+	end
+end)
+
+task.spawn(function()
+	while true do
+		if ConfigData.GetItemsForAutoBombBus then
+			local char = player.Character
+			local hrp = char and char:FindFirstChild("HumanoidRootPart")
+			local itemRemote = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("Item")
+			if hrp and itemRemote then
+				for _, obj in ipairs(workspace:GetDescendants()) do
+					if not ConfigData.GetItemsForAutoBombBus then break end
+					if obj:IsA("Tool") and (obj.Name == "Bomb" or obj.Name == "Apple" or obj.Name == "Bandage" or obj.Name == "Potion of Strength" or obj.Name == "Witch Brew") then
+						local targetPart = obj:FindFirstChild("Handle") or (obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")))
+						if targetPart and targetPart:IsA("BasePart") then
+							hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
+							task.wait(0.4)
+							local id = targetPart:GetAttribute("ItemId") or obj:GetAttribute("ItemId")
+							if id then
+								pcall(function() itemRemote:FireServer(id) end)
+							end
+							break
+						end
+					end
+				end
+			end
+		end
+		task.wait(1.5)
 	end
 end)
 
