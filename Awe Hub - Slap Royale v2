@@ -40,6 +40,204 @@ player.CharacterAdded:Connect(function(char)
 	humanoidrootpart = char:WaitForChild("HumanoidRootPart")
 end)
 
+--[[ Universal Anti-Lag Logic Integration ]]
+local runtimeConnections = {}
+local changedProperties = {}
+local antiLagEnabled = false
+local descendantConnection
+
+local oldQualityLevel
+local oldSavedQualityLevel
+
+local function addConnection(conn)
+    table.insert(runtimeConnections, conn)
+    return conn
+end
+
+local function disconnectConnection(conn)
+    if conn then
+        pcall(function()
+            conn:Disconnect()
+        end)
+    end
+end
+
+local function safeGet(instance, propertyName)
+    local ok, value = pcall(function()
+        return instance[propertyName]
+    end)
+    return ok and value or nil
+end
+
+local function safeSet(instance, propertyName, value)
+    pcall(function()
+        instance[propertyName] = value
+    end)
+end
+
+local function rememberProperty(instance, propertyName)
+    if not instance then return end
+    local data = changedProperties[instance]
+    if not data then
+        data = {}
+        changedProperties[instance] = data
+    end
+    if data[propertyName] == nil then
+        data[propertyName] = safeGet(instance, propertyName)
+    end
+end
+
+local function rememberAndSet(instance, propertyName, value)
+    if not instance then return end
+    rememberProperty(instance, propertyName)
+    safeSet(instance, propertyName, value)
+end
+
+local function shouldSkip(instance)
+    if not instance then return true end
+    local char = player.Character
+    if char and instance:IsDescendantOf(char) then
+        return true
+    end
+    return false
+end
+
+local function optimizeInstance(instance)
+    if shouldSkip(instance) then return end
+
+    if instance:IsA("BasePart") then
+        rememberAndSet(instance, "Material", Enum.Material.SmoothPlastic)
+        rememberAndSet(instance, "Reflectance", 0)
+        rememberAndSet(instance, "CastShadow", false)
+
+        if instance:IsA("MeshPart") then
+            rememberAndSet(instance, "RenderFidelity", Enum.RenderFidelity.Performance)
+            rememberAndSet(instance, "TextureID", "")
+        end
+    elseif instance:IsA("Decal") or instance:IsA("Texture") then
+        rememberAndSet(instance, "Transparency", 1)
+    elseif instance:IsA("ParticleEmitter")
+        or instance:IsA("Trail")
+        or instance:IsA("Beam")
+        or instance:IsA("Smoke")
+        or instance:IsA("Fire")
+        or instance:IsA("Sparkles") then
+        rememberAndSet(instance, "Enabled", false)
+    elseif instance:IsA("PointLight") or instance:IsA("SpotLight") or instance:IsA("SurfaceLight") then
+        rememberAndSet(instance, "Enabled", false)
+    elseif instance:IsA("SpecialMesh") then
+        rememberAndSet(instance, "TextureId", "")
+    elseif instance:IsA("SurfaceAppearance") then
+        rememberAndSet(instance, "ColorMap", "")
+        rememberAndSet(instance, "MetalnessMap", "")
+        rememberAndSet(instance, "NormalMap", "")
+        rememberAndSet(instance, "RoughnessMap", "")
+    end
+end
+
+local function optimizeLighting()
+    rememberAndSet(Lighting, "Technology", Enum.Technology.Compatibility)
+    rememberAndSet(Lighting, "GlobalShadows", false)
+    rememberAndSet(Lighting, "FogEnd", 1e9)
+    rememberAndSet(Lighting, "ShadowSoftness", 0)
+
+    for _, effect in ipairs(Lighting:GetChildren()) do
+        if effect:IsA("PostEffect") then
+            rememberAndSet(effect, "Enabled", false)
+        elseif effect:IsA("Atmosphere") then
+            rememberAndSet(effect, "Density", 0)
+            rememberAndSet(effect, "Haze", 0)
+            rememberAndSet(effect, "Glare", 0)
+        elseif effect:IsA("Sky") then
+            rememberAndSet(effect, "CelestialBodiesShown", false)
+            rememberAndSet(effect, "StarCount", 0)
+        end
+    end
+end
+
+local function optimizeTerrain()
+    local terrain = workspace:FindFirstChildOfClass("Terrain")
+    if not terrain then return end
+
+    rememberAndSet(terrain, "Decoration", false)
+    rememberAndSet(terrain, "WaterWaveSize", 0)
+    rememberAndSet(terrain, "WaterWaveSpeed", 0)
+    rememberAndSet(terrain, "WaterReflectance", 0)
+    rememberAndSet(terrain, "WaterTransparency", 1)
+end
+
+local function restoreAllProperties()
+    for instance, propertyData in pairs(changedProperties) do
+        if instance and instance.Parent then
+            for propertyName, oldValue in pairs(propertyData) do
+                safeSet(instance, propertyName, oldValue)
+            end
+        end
+        changedProperties[instance] = nil
+    end
+end
+
+local function setLowestQuality()
+    pcall(function()
+        local rendering = settings().Rendering
+        if oldQualityLevel == nil then
+            oldQualityLevel = rendering.QualityLevel
+        end
+        rendering.QualityLevel = Enum.QualityLevel.Level01
+    end)
+
+    pcall(function()
+        local userGameSettings = UserSettings():GetService("UserGameSettings")
+        if oldSavedQualityLevel == nil then
+            oldSavedQualityLevel = userGameSettings.SavedQualityLevel
+        end
+        userGameSettings.SavedQualityLevel = Enum.SavedQualitySetting.QualityLevel1
+    end)
+end
+
+local function restoreQuality()
+    if oldQualityLevel ~= nil then
+        pcall(function()
+            settings().Rendering.QualityLevel = oldQualityLevel
+        end)
+    end
+
+    if oldSavedQualityLevel ~= nil then
+        pcall(function()
+            local userGameSettings = UserSettings():GetService("UserGameSettings")
+            userGameSettings.SavedQualityLevel = oldSavedQualityLevel
+        end)
+    end
+end
+
+local function enableAntiLag()
+    if antiLagEnabled then return end
+    antiLagEnabled = true
+    setLowestQuality()
+    optimizeLighting()
+    optimizeTerrain()
+
+    for _, instance in ipairs(workspace:GetDescendants()) do
+        optimizeInstance(instance)
+    end
+
+    descendantConnection = addConnection(workspace.DescendantAdded:Connect(function(instance)
+        if antiLagEnabled then
+            optimizeInstance(instance)
+        end
+    end))
+end
+
+local function disableAntiLag()
+    if not antiLagEnabled then return end
+    antiLagEnabled = false
+    disconnectConnection(descendantConnection)
+    descendantConnection = nil
+
+    restoreAllProperties()
+    restoreQuality()
+end
+
 --[[ Configuration System ]]
 local ConfigFileName = "AWEHub_SlapRoyale_Config.json"
 
@@ -93,6 +291,7 @@ local ConfigData = {
 	AutoHeal = false,
 	AutoWin = false,
 	Fly = false,
+	AntiLag = false,
 }
 
 local function SaveConfig()
@@ -472,6 +671,36 @@ ConfigTab:Button({
 		Notification("Config", "Configuration reloaded.", 4, "bird")
 	end
 })
+
+-- Added Anti-Lag Toggle under Settings/Config Tab
+ConfigTab:Toggle({
+	Title = "Anti-Lag",
+	Desc = "Reduces textures, decals, particles, and lights to boost performance",
+	Icon = "bird",
+	Type = "Checkbox",
+	Value = ConfigData.AntiLag,
+	Callback = function(Value)
+		ConfigData.AntiLag = Value
+		SaveConfig()
+		if Value then
+			enableAntiLag()
+			Notification("Anti-Lag", "Anti-Lag Enabled", 3, "bird")
+		else
+			disableAntiLag()
+			Notification("Anti-Lag", "Anti-Lag Disabled", 3, "bird")
+		end
+	end
+})
+
+-- Auto-apply if saved config had it enabled
+if ConfigData.AntiLag then
+	task.spawn(function()
+		task.wait(1)
+		if ConfigData.AntiLag then
+			enableAntiLag()
+		end
+	end)
+end
 
 Game:Toggle({
 	Title = "Staff Detection",
