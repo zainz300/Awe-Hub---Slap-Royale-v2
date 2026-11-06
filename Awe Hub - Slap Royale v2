@@ -18,7 +18,7 @@ _G.Glove = false
 _G.Kills = false
 _G.Power = false
 _G.Speed = false
-_G.SpeedValue = 0
+_G.SpeedValue = 25
 _G.JumpPower = false
 _G.Health = false
 _G.SlapAura = false
@@ -244,7 +244,7 @@ local ConfigFileName = "AWEHub_SlapRoyale_Config.json"
 local ConfigData = {
 	StaffDetection = false,
 	WalkSpeed = false,
-	SpeedValue = 12,
+	SpeedValue = 25,
 	SpeedBoost = false,
 	SpeedBoostBypass = false,
 	SpeedDistance = 10,
@@ -899,10 +899,11 @@ Game:Button({
 	end
 })
 
--- Walkspeed Logic using Velocity + RootPart and max 25
+-- Walkspeed Logic integrated with new velocity loop and textbox/input setup
 local speedConnection = nil
+
 PlayerMods:Toggle({
-	Title = "WalkSpeed",
+	Title = "Movement Speed",
 	Desc = "Increases your speed using velocity + rootpart",
 	Icon = "bird",
 	Type = "Checkbox",
@@ -920,12 +921,16 @@ PlayerMods:Toggle({
 				local character = player.Character
 				local hrp = character and character:FindFirstChild("HumanoidRootPart")
 				local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+				
 				if not character or character:GetAttribute("Ragdolled") or not hrp or not humanoid then return end
+				
 				local move = humanoid.MoveDirection
 				if move.Magnitude <= 0 then return end
+				
 				local velocity = hrp.AssemblyLinearVelocity
 				local horizontal = Vector3.new(velocity.X, 0, velocity.Z)
 				local speed = humanoid.WalkSpeed + (tonumber(_G.SpeedValue) or 0)
+				
 				if horizontal.Magnitude > speed then
 					horizontal = horizontal.Unit * speed
 					hrp.AssemblyLinearVelocity = Vector3.new(horizontal.X, velocity.Y, horizontal.Z)
@@ -938,14 +943,14 @@ PlayerMods:Toggle({
 	end
 })
 
-PlayerMods:Slider({
-	Title = "WalkSpeed Value",
-	Desc = "Adjust speed value up to 25",
-	Step = 1,
-	Value = { Min = 1, Max = 25, Default = ConfigData.SpeedValue },
+PlayerMods:Input({
+	Title = "Speed Value",
+	Desc = "Type custom speed addition value",
+	Value = tostring(ConfigData.SpeedValue),
+	Placeholder = "25",
 	Callback = function(Value)
-		ConfigData.SpeedValue = tonumber(Value) or 0
 		_G.SpeedValue = tonumber(Value) or 0
+		ConfigData.SpeedValue = tonumber(Value) or 25
 		SaveConfig()
 	end
 })
