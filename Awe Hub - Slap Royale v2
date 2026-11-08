@@ -40,7 +40,7 @@ player.CharacterAdded:Connect(function(char)
 	humanoidrootpart = char:WaitForChild("HumanoidRootPart")
 end)
 
---[[ Universal Anti-Lag Logic Integration ]]
+--[[ Universal Anti-Lag Logic Integration (Asynchronous / Non-Blocking) ]]
 local runtimeConnections = {}
 local changedProperties = {}
 local antiLagEnabled = false
@@ -217,9 +217,14 @@ local function enableAntiLag()
     optimizeLighting()
     optimizeTerrain()
 
-    for _, instance in ipairs(workspace:GetDescendants()) do
-        optimizeInstance(instance)
-    end
+    -- Run chunked optimization asynchronously to eliminate instant execution lag
+    task.spawn(function()
+        for _, instance in ipairs(workspace:GetDescendants()) do
+            if not antiLagEnabled then break end
+            optimizeInstance(instance)
+            task.wait()
+        end
+    end)
 
     descendantConnection = addConnection(workspace.DescendantAdded:Connect(function(instance)
         if antiLagEnabled then
@@ -292,6 +297,8 @@ local ConfigData = {
 	AutoWin = false,
 	Fly = false,
 	AntiLag = false,
+	GetItems = false,
+	GetItemsSpeed = "Slow",
 }
 
 local function SaveConfig()
@@ -328,20 +335,6 @@ local RayParams = RaycastParams.new()
 RayParams.FilterDescendantsInstances = {character}
 RayParams.FilterType = Enum.RaycastFilterType.Exclude
 
--- Check if player currently has a glove equipped
-local function IsHoldingGlove()
-	local char = player.Character
-	if not char then return false end
-	local tool = char:FindFirstChildOfClass("Tool")
-	if tool and (tool.Name:lower():find("glove") or tool:FindFirstChild("Glove") or tool:GetAttribute("IsGlove")) then
-		return true
-	end
-	if tool and tool.Name ~= "Apple" and tool.Name ~= "Bandage" and tool.Name ~= "Bomb" and tool.Name ~= "Tomahawk" then
-		return true
-	end
-	return false
-end
-
 local function PumpkinSafeTP(targetPart)
 	local char = player.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -377,7 +370,7 @@ local Combat = {
 	HitboxSize = 10,
 	SlapAuraEnabled = ConfigData.SlapAura,
 	SlapAuraThread = nil,
-	SlapAuraRange = 20,
+	SlapAuraRange = 11, -- Updated Slap Aura Range to 11 studs
 	SlapAuraInterval = 0.45,
 	SlapAuraFastInterval = 0.1,
 	SlapAuraDefaultInterval = 2.2,
@@ -465,7 +458,7 @@ local function GetPlayerInfo(target)
 			power = targetChar.Power.Value
 		end
 		if power == nil and targetChar:FindFirstChild("leaderstats") and target.leaderstats:FindFirstChild("Power") then
-			power = target.leaderstats.Power.Value
+			power = targetChar.leaderstats.Power.Value
 		end
 		if power ~= nil then
 			table.insert(output, "Power: " .. tostring(power))
@@ -499,30 +492,6 @@ local function GetGloveName(targetPlayer)
 	local success, val = pcall(function() return gloveVal.Value end)
 	if success and val ~= nil then return tostring(val) end
 	return "Unknown"
-end
-
-local function TP()
-	local char = player.Character
-	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if hrp and hum then
-		local direction = hum.MoveDirection
-		if direction.Magnitude > 0 then
-			direction = direction.Unit
-			local boxCFrame, boxSize = char:GetBoundingBox()
-			local rayParams = RaycastParams.new()
-			rayParams.FilterType = Enum.RaycastFilterType.Exclude
-			rayParams.FilterDescendantsInstances = {char}
-			local result = workspace:Blockcast(boxCFrame, boxSize, direction * speeddistance, rayParams)
-			local distance = speeddistance
-			if result then
-				distance = math.max(result.Distance - 0.5, 0)
-			end
-			if distance > 0 then
-				hrp.CFrame += direction * distance
-			end
-		end
-	end
 end
 
 local function RemoveZoneEffects()
@@ -672,7 +641,6 @@ ConfigTab:Button({
 	end
 })
 
--- Added Anti-Lag Toggle under Settings/Config Tab
 ConfigTab:Toggle({
 	Title = "Anti-Lag",
 	Desc = "Reduces textures, decals, particles, and lights to boost performance",
@@ -692,7 +660,6 @@ ConfigTab:Toggle({
 	end
 })
 
--- Auto-apply if saved config had it enabled
 if ConfigData.AntiLag then
 	task.spawn(function()
 		task.wait(1)
@@ -899,7 +866,6 @@ Game:Button({
 	end
 })
 
--- Walkspeed Logic integrated with new velocity loop and textbox/input setup
 local speedConnection = nil
 
 PlayerMods:Toggle({
@@ -968,7 +934,15 @@ PlayerMods:Toggle({
 		SaveConfig()
 		task.spawn(function()
 			while ConfigData.SpeedBoost do
-				TP()
+				local char = player.Character
+				local hrp = char and char:FindFirstChild("HumanoidRootPart")
+				local hum = char and char:FindFirstChildOfClass("Humanoid")
+				if hrp and hum then
+					local direction = hum.MoveDirection
+					if direction.Magnitude > 0 then
+						hrp.CFrame += direction.Unit * speeddistance
+					end
+				end
 				task.wait(boostcooldown)
 			end
 		end)
@@ -1981,25 +1955,24 @@ Game:Toggle({
 })
 
 Game:Toggle({
-	Title = "Get items for auto bomb bus",
-	Desc = "Gets items specifically required for auto bomb bus",
+	Title = "Get Items",
+	Desc = "Automatically collects useful items across the map",
 	Icon = "bird",
 	Type = "Checkbox",
-	Value = ConfigData.GetItemsForAutoBombBus,
+	Value = ConfigData.GetItems,
 	Callback = function(Value)
-		ConfigData.GetItemsForAutoBombBus = Value
+		ConfigData.GetItems = Value
 		SaveConfig()
 	end
 })
 
-Game:Toggle({
-	Title = "Slow Get Items",
-	Desc = "Friendly for more laggy users",
-	Icon = "bird",
-	Type = "Checkbox",
-	Value = ConfigData.SlowGetItems,
-	Callback = function(Value)
-		ConfigData.SlowGetItems = Value
+Game:Dropdown({
+	Title = "Get Items Speed",
+	Desc = "Select collection speed tier",
+	Values = {"Slow", "Fast"},
+	Value = ConfigData.GetItemsSpeed,
+	Callback = function(Selected)
+		ConfigData.GetItemsSpeed = Selected
 		SaveConfig()
 	end
 })
@@ -2016,8 +1989,6 @@ Game:Toggle({
 	end
 })
 
-local AutoBombBusEnabled = false
-
 Game:Toggle({
 	Title = "Auto Bomb Bus",
 	Desc = "Automatically activates bomb after exiting bus",
@@ -2025,7 +1996,6 @@ Game:Toggle({
 	Type = "Checkbox",
 	Value = ConfigData.AutoBombBus,
 	Callback = function(Value)
-		AutoBombBusEnabled = Value
 		ConfigData.AutoBombBus = Value
 		SaveConfig()
 	end
@@ -2033,7 +2003,7 @@ Game:Toggle({
 
 task.spawn(function()
 	while true do
-		if AutoBombBusEnabled then
+		if ConfigData.AutoBombBus then
 			local head = character and character:FindFirstChild("Head")
 			if head and head.Transparency == 1 then
 				task.wait(10.3)
@@ -2047,6 +2017,40 @@ task.spawn(function()
 			end
 		end
 		task.wait(0.05)
+	end
+end)
+
+task.spawn(function()
+	local itemRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Item", 5)
+	while true do
+		local waitTime = (ConfigData.GetItemsSpeed == "Fast") and 0.4 or 1.5
+		task.wait(waitTime)
+		if ConfigData.GetItems and itemRemote then
+			pcall(function()
+				local char = player.Character
+				if char and char:FindFirstChild("HumanoidRootPart") then
+					local hrp = char.HumanoidRootPart
+					local itemsFolder = workspace:FindFirstChild("Items")
+					if itemsFolder then
+						for _, obj in ipairs(itemsFolder:GetChildren()) do
+							if not ConfigData.GetItems then break end
+							if obj:IsA("Tool") then
+								local handle = obj:FindFirstChild("Handle")
+								if handle and handle:IsA("BasePart") then
+									hrp.CFrame = handle.CFrame + Vector3.new(0, 3, 0)
+									task.wait(ConfigData.GetItemsSpeed == "Fast" and 0.2 or 0.5)
+									local id = handle:GetAttribute("ItemId") or obj:GetAttribute("ItemId")
+									if id then
+										pcall(function() itemRemote:FireServer(id) end)
+									end
+									break
+								end
+							end
+						end
+					end
+				end
+			end)
+		end
 	end
 end)
 
@@ -2225,34 +2229,6 @@ task.spawn(function()
 				end
 			end)
 		end
-	end
-end)
-
-task.spawn(function()
-	while true do
-		if ConfigData.GetItemsForAutoBombBus then
-			local char = player.Character
-			local hrp = char and char:FindFirstChild("HumanoidRootPart")
-			local itemRemote = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("Item")
-			if hrp and itemRemote then
-				for _, obj in ipairs(workspace:GetDescendants()) do
-					if not ConfigData.GetItemsForAutoBombBus then break end
-					if obj:IsA("Tool") and (obj.Name == "Bomb" or obj.Name == "Apple" or obj.Name == "Bandage" or obj.Name == "Potion of Strength" or obj.Name == "Witch Brew") then
-						local targetPart = obj:FindFirstChild("Handle") or (obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")))
-						if targetPart and targetPart:IsA("BasePart") then
-							hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
-							task.wait(0.4)
-							local id = targetPart:GetAttribute("ItemId") or obj:GetAttribute("ItemId")
-							if id then
-								pcall(function() itemRemote:FireServer(id) end)
-							end
-							break
-						end
-					end
-				end
-			end
-		end
-		task.wait(1.5)
 	end
 end)
 
