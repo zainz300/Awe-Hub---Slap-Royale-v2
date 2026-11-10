@@ -191,7 +191,7 @@ local function setLowestQuality()
         if oldSavedQualityLevel == nil then
             oldSavedQualityLevel = userGameSettings.SavedQualityLevel
         end
-        userGameSettings.SavedQualityLevel = Enum.SavedQualitySetting.QualityLevel1
+        userGameSettings.SavedQualityLevel = Enum.SavedSavedQualitySetting ~= nil and Enum.SavedQualitySetting.QualityLevel1 or userGameSettings.SavedQualityLevel
     end)
 end
 
@@ -217,7 +217,6 @@ local function enableAntiLag()
     optimizeLighting()
     optimizeTerrain()
 
-    -- Run chunked optimization asynchronously to eliminate instant execution lag
     task.spawn(function()
         for _, instance in ipairs(workspace:GetDescendants()) do
             if not antiLagEnabled then break end
@@ -284,8 +283,8 @@ local ConfigData = {
 	GloveESP = false,
 	AutoCollect = false,
 	AutoCollectItemsToggle = false,
+	AutoPickup = false,
 	SelectedAutoCollectItem = "Apple",
-	GetItemsForAutoBombBus = false,
 	SlowGetItems = false,
 	AutoUseItems = false,
 	AutoBombBus = false,
@@ -299,6 +298,7 @@ local ConfigData = {
 	AntiLag = false,
 	GetItems = false,
 	GetItemsSpeed = "Slow",
+	SpectatorDetector = false,
 }
 
 local function SaveConfig()
@@ -330,7 +330,6 @@ end
 LoadConfig()
 _G.SpeedValue = ConfigData.SpeedValue
 
--- RayParams for Safe TP Logic
 local RayParams = RaycastParams.new()
 RayParams.FilterDescendantsInstances = {character}
 RayParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -370,7 +369,7 @@ local Combat = {
 	HitboxSize = 10,
 	SlapAuraEnabled = ConfigData.SlapAura,
 	SlapAuraThread = nil,
-	SlapAuraRange = 13, -- Updated Slap Aura Range to 13 studs
+	SlapAuraRange = 13,
 	SlapAuraInterval = 0.45,
 	SlapAuraFastInterval = 0.1,
 	SlapAuraDefaultInterval = 2.2,
@@ -457,7 +456,7 @@ local function GetPlayerInfo(target)
 		if power == nil and targetChar:FindFirstChild("Power") then
 			power = targetChar.Power.Value
 		end
-		if power == nil and targetChar:FindFirstChild("leaderstats") and target.leaderstats:FindFirstChild("Power") then
+		if power == nil and targetChar:FindFirstChild("leaderstats") and targetChar.leaderstats:FindFirstChild("Power") then
 			power = targetChar.leaderstats.Power.Value
 		end
 		if power ~= nil then
@@ -510,14 +509,31 @@ local function RemoveIceCube()
 	end
 end
 
-local function DeathCubes(touch)
-	for _, v in pairs(workspace:GetDescendants()) do
-		if v.Name == "Cube of Death" or v.Name == "Death" then
-			v.CanTouch = touch
-			v.CanQuery = touch
+-- Updated Anti Cube of Death logic (from the newer Pumpkin Hub version).
+-- It removes matching cube objects found inside Workspace.Rubbled Remains.
+local AntiCubeOfDeathEnabled = false
+
+task.spawn(function()
+	while true do
+		if AntiCubeOfDeathEnabled then
+			local rubble = workspace:FindFirstChild("Rubbled Remains")
+
+			if rubble then
+				for _, obj in ipairs(rubble:GetDescendants()) do
+					if obj.Name == "Cube of Death"
+						or obj.Name == "Death"
+						or obj.Name == "■" then
+						pcall(function()
+							obj:Destroy()
+						end)
+					end
+				end
+			end
 		end
+
+		task.wait(0.1)
 	end
-end
+end)
 
 local GroupId = 9950771
 local SBStaff = {
@@ -866,6 +882,106 @@ Game:Button({
 	end
 })
 
+--[[ Spectator & Dead Player Detector Feature ]]
+Game:Toggle({
+	Title = "Spectator & 0-Health Detector",
+	Desc = "Detects dead players (0 HP) and who is spectating you",
+	Icon = "bird",
+	Type = "Checkbox",
+	Value = ConfigData.SpectatorDetector,
+	Callback = function(Value)
+		ConfigData.SpectatorDetector = Value
+		SaveConfig()
+	end
+})
+
+-- UI Tracker Container for Spectator / Dead Players
+local spectatorGui = Instance.new("ScreenGui")
+spectatorGui.Name = "AWE_SpectatorDetector"
+spectatorGui.ResetOnSpawn = false
+spectatorGui.Parent = CoreGui
+
+local specFrame = Instance.new("Frame")
+specFrame.Size = UDim2.new(0, 220, 0, 150)
+specFrame.Position = UDim2.new(0, 20, 0, 200)
+specFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+specFrame.BackgroundTransparency = 0.4
+specFrame.BorderSizePixel = 0
+specFrame.Visible = false
+specFrame.Parent = spectatorGui
+
+local specCorner = Instance.new("UICorner")
+specCorner.CornerRadius = UDim.new(0, 8)
+specCorner.Parent = specFrame
+
+local specTitle = Instance.new("TextLabel")
+specTitle.Size = UDim2.new(1, 0, 0, 30)
+specTitle.BackgroundTransparency = 1
+specTitle.Text = "Spectator Status"
+specTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+specTitle.TextSize = 13
+specTitle.Font = Enum.Font.SourceSansBold
+specTitle.Parent = specFrame
+
+local specList = Instance.new("TextLabel")
+specList.Size = UDim2.new(1, -10, 1, -35)
+specList.Position = UDim2.new(0, 5, 0, 30)
+specList.BackgroundTransparency = 1
+specList.Text = "Scanning..."
+specList.TextColor3 = Color3.fromRGB(200, 200, 200)
+specList.TextSize = 12
+specList.Font = Enum.Font.SourceSans
+specList.TextXAlignment = Enum.TextXAlignment.Left
+specList.TextYAlignment = Enum.TextYAlignment.Top
+specList.TextWrapped = true
+specList.Parent = specFrame
+
+RunService.RenderStepped:Connect(function()
+	if not ConfigData.SpectatorDetector then
+		specFrame.Visible = false
+		return
+	end
+	
+	specFrame.Visible = true
+	local deadList = {}
+	local spectatingUs = {}
+	
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= player then
+			local char = p.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			
+			-- Check if 0 health / dead
+			if not hum or hum.Health <= 0 then
+				table.insert(deadList, p.Name)
+				
+				-- Check if spectating local player (camera target or distance matching)
+				local cam = workspace.CurrentCamera
+				if cam and (cam.CameraSubject == humanoid or cam.CameraSubject == character) then
+					-- Extra heuristic: if their camera or character view tracks us
+					table.insert(spectatingUs, p.Name)
+				end
+			end
+		end
+	end
+	
+	local textResult = "<b>Dead / 0 Health:</b>\n"
+	if #deadList > 0 then
+		textResult = textResult .. table.concat(deadList, ", ") .. "\n\n"
+	else
+		textResult = textResult .. "None\n\n"
+	end
+	
+	textResult = textResult .. "<b>Spectating You:</b>\n"
+	if #spectatingUs > 0 then
+		textResult = textResult .. table.concat(spectatingUs, ", ")
+	else
+		textResult = textResult .. "None (or checking camera)"
+	end
+	
+	specList.Text = textResult
+end)
+
 local speedConnection = nil
 
 PlayerMods:Toggle({
@@ -1174,6 +1290,7 @@ PlayerMods:Toggle({
 
 local TargetPlayerName = nil
 local SelectedTPPlayerName = nil
+local TPPlayerDropdown
 local KillPlayerRunning = false
 
 local function GetPlayerNames()
@@ -1207,11 +1324,18 @@ CombatTab:Button({
 		if SelectedTPPlayerName and not table.find(names, SelectedTPPlayerName) then
 			SelectedTPPlayerName = nil
 		end
-		TargetDropdown:SetValues(names)
-		if TPPlayerDropdown then
-			TPPlayerDropdown:SetValues(names)
+		local refreshOK = pcall(function()
+			TargetDropdown:Refresh(names)
+			if TPPlayerDropdown then
+				TPPlayerDropdown:Refresh(names)
+			end
+		end)
+
+		if refreshOK then
+			Notification("Target List", "Target lists refreshed successfully! Active player count: " .. tostring(#names), 3, "bird")
+		else
+			Notification("Target List", "Could not refresh the dropdowns. Please try again.", 3, "bird")
 		end
-		Notification("Target List", "Target lists refreshed successfully! Active player count: " .. tostring(#names), 3, "bird")
 	end
 })
 
@@ -1244,7 +1368,7 @@ CombatTab:Toggle({
 
 CombatTab:Divider()
 
-local TPPlayerDropdown = CombatTab:Dropdown({
+TPPlayerDropdown = CombatTab:Dropdown({
 	Title = "Select Player to TP",
 	Desc = "Choose a player to teleport to safely",
 	Values = GetPlayerNames(),
@@ -1351,33 +1475,146 @@ CombatTab:Toggle({
 	end
 })
 
+local AutoWinMode = "One at a time"
+local AutoWinRunning = false
+local AutoWinCurrentTarget = nil
+
+local AUTO_WIN_INTERVAL = 3
+local TARGETS_BEFORE_PAUSE = 5
+local PAUSE_DURATION = 10
+local autoWinHitCount = 0
+local autoWinPauseUntil = 0
+
+CombatTab:Dropdown({
+	Title = "Auto Win Mode",
+	Desc = "Choose how Auto Win selects players",
+	Values = {"One at a time", "Slap All"},
+	Value = "One at a time",
+	Callback = function(Selected)
+		if type(Selected) == "table" then
+			AutoWinMode = Selected[1] or "One at a time"
+		else
+			AutoWinMode = Selected or "One at a time"
+		end
+		AutoWinCurrentTarget = nil
+		autoWinHitCount = 0
+		autoWinPauseUntil = 0
+	end
+})
+
+local function GetAutoWinRoot(targetPlayer)
+	if not targetPlayer then return nil end
+	local character = targetPlayer.Character
+	if not character then return nil end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or humanoid.Health <= 0 or not root then return nil end
+	return root
+end
+
+local function IsAutoWinRagdolled(targetPlayer)
+	local character = targetPlayer and targetPlayer.Character
+	if not character then return true end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then return true end
+	local ragdollValue = character:FindFirstChild("Ragdolled", true)
+	if ragdollValue and ragdollValue:IsA("BoolValue") then
+		return ragdollValue.Value
+	end
+	return humanoid.PlatformStand
+end
+
+local function GetClosestAutoWinPlayer(skipRagdolled)
+	local myCharacter = player.Character
+	local myHumanoid = myCharacter and myCharacter:FindFirstChildOfClass("Humanoid")
+	local myRoot = myCharacter and myCharacter:FindFirstChild("HumanoidRootPart")
+
+	if not myHumanoid or myHumanoid.Health <= 0 or not myRoot then return nil end
+
+	local closestPlayer = nil
+	local closestDistance = math.huge
+
+	for _, targetPlayer in ipairs(Players:GetPlayers()) do
+		if targetPlayer ~= player then
+			local targetRoot = GetAutoWinRoot(targetPlayer)
+			if targetRoot and not (skipRagdolled and IsAutoWinRagdolled(targetPlayer)) then
+				local distance = (myRoot.Position - targetRoot.Position).Magnitude
+				if distance < closestDistance then
+					closestDistance = distance
+					closestPlayer = targetPlayer
+				end
+			end
+		end
+	end
+
+	return closestPlayer
+end
+
 CombatTab:Toggle({
 	Title = "Auto Win",
-	Desc = "Automatically attacks and positions to win the round",
+	Desc = "Automatically selects and moves toward players",
 	Icon = "bird",
 	Type = "Checkbox",
 	Value = ConfigData.AutoWin,
 	Callback = function(Value)
 		ConfigData.AutoWin = Value
 		SaveConfig()
+
+		if not Value then
+			AutoWinCurrentTarget = nil
+			autoWinHitCount = 0
+			autoWinPauseUntil = 0
+			return
+		end
+
+		if AutoWinRunning then return end
+
+		AutoWinRunning = true
 		task.spawn(function()
 			while ConfigData.AutoWin do
-				local char = player.Character
-				local hrp = char and char:FindFirstChild("HumanoidRootPart")
-				if hrp then
-					for _, p in ipairs(Players:GetPlayers()) do
-						if p ~= player and p.Character then
-							local targetHrp = p.Character:FindFirstChild("HumanoidRootPart")
-							local hum = p.Character:FindFirstChildOfClass("Humanoid")
-							if targetHrp and hum and hum.Health > 0 then
-								hrp.CFrame = targetHrp.CFrame
-								break
+				task.wait(AUTO_WIN_INTERVAL)
+
+				if os.clock() < autoWinPauseUntil then continue end
+
+				local ok, err = pcall(function()
+					local myCharacter = player.Character
+					local myHumanoid = myCharacter and myCharacter:FindFirstChildOfClass("Humanoid")
+					local myRoot = myCharacter and myCharacter:FindFirstChild("HumanoidRootPart")
+
+					if not myHumanoid or myHumanoid.Health <= 0 or not myRoot then return end
+
+					if AutoWinMode == "One at a time" then
+						if not AutoWinCurrentTarget or not GetAutoWinRoot(AutoWinCurrentTarget) then
+							AutoWinCurrentTarget = GetClosestAutoWinPlayer(false)
+						end
+
+						local targetRoot = GetAutoWinRoot(AutoWinCurrentTarget)
+						if targetRoot then
+							myRoot.CFrame = targetRoot.CFrame * CFrame.new(3, 0, 0)
+						end
+					else
+						AutoWinCurrentTarget = GetClosestAutoWinPlayer(true)
+						local targetRoot = GetAutoWinRoot(AutoWinCurrentTarget)
+
+						if targetRoot and not IsAutoWinRagdolled(AutoWinCurrentTarget) then
+							myRoot.CFrame = targetRoot.CFrame * CFrame.new(3, 0, 0)
+							autoWinHitCount += 1
+
+							if autoWinHitCount >= TARGETS_BEFORE_PAUSE then
+								autoWinHitCount = 0
+								autoWinPauseUntil = os.clock() + PAUSE_DURATION
+								AutoWinCurrentTarget = nil
 							end
 						end
 					end
+				end)
+
+				if not ok then
+					warn("[Auto Win] Error:", err)
 				end
-				task.wait(5)
 			end
+
+			AutoWinRunning = false
 		end)
 	end
 })
@@ -1535,8 +1772,8 @@ Immunites:Toggle({
 	Value = ConfigData.AntiCubeOfDeath,
 	Callback = function(Value)
 		ConfigData.AntiCubeOfDeath = Value
+		AntiCubeOfDeathEnabled = Value == true
 		SaveConfig()
-		if ConfigData.AntiCubeOfDeath == true then DeathCubes(false) else DeathCubes(true) end
 	end
 })
 
@@ -1955,6 +2192,18 @@ Game:Toggle({
 })
 
 Game:Toggle({
+	Title = "Auto Pickup",
+	Desc = "Automatically picks up nearby items without teleporting",
+	Icon = "bird",
+	Type = "Checkbox",
+	Value = ConfigData.AutoPickup,
+	Callback = function(Value)
+		ConfigData.AutoPickup = Value
+		SaveConfig()
+	end
+})
+
+Game:Toggle({
 	Title = "Get Items",
 	Desc = "Automatically collects useful items across the map",
 	Icon = "bird",
@@ -2232,6 +2481,7 @@ task.spawn(function()
 	end
 end)
 
+-- Delete All Seats: updated to match the latest Pumpkin Hub scan loop.
 task.spawn(function()
 	while true do
 		if ConfigData.DeleteSeats then
@@ -2241,6 +2491,48 @@ task.spawn(function()
 				end
 			end
 		end
-		task.wait(0.5)
+		task.wait(1)
+	end
+end)
+
+
+-- Auto Pickup: collect items already within range; does not teleport the player.
+task.spawn(function()
+	local remotes = ReplicatedStorage:WaitForChild("Remotes")
+	local itemRemote = remotes:WaitForChild("Item", 10)
+	local attempted = setmetatable({}, {__mode = "k"})
+
+	while true do
+		task.wait(0.25)
+
+		if ConfigData.AutoPickup and itemRemote then
+			local char = player.Character
+			local root = char and char:FindFirstChild("HumanoidRootPart")
+			local itemsFolder = workspace:FindFirstChild("Items")
+
+			if root and itemsFolder then
+				for _, tool in ipairs(itemsFolder:GetChildren()) do
+					if not ConfigData.AutoPickup then
+						break
+					end
+
+					if tool:IsA("Tool") and not attempted[tool] then
+						local handle = tool:FindFirstChild("Handle")
+						if handle and handle:IsA("BasePart")
+							and (handle.Position - root.Position).Magnitude <= 12 then
+							local itemId = handle:GetAttribute("ItemId")
+								or tool:GetAttribute("ItemId")
+
+							if itemId then
+								attempted[tool] = true
+								pcall(function()
+									itemRemote:FireServer(itemId)
+								end)
+							end
+						end
+					end
+				end
+			end
+		end
 	end
 end)
