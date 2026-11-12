@@ -20,7 +20,6 @@ _G.Power = false
 _G.Speed = false
 _G.SpeedValue = 25
 _G.JumpPower = false
-_G.Health = false
 _G.SlapAura = false
 _G.AutoWin = false
 _G.AntiAcid = false
@@ -191,7 +190,7 @@ local function setLowestQuality()
         if oldSavedQualityLevel == nil then
             oldSavedQualityLevel = userGameSettings.SavedQualityLevel
         end
-        userGameSettings.SavedQualityLevel = Enum.SavedSavedQualitySetting ~= nil and Enum.SavedQualitySetting.QualityLevel1 or userGameSettings.SavedQualityLevel
+        userGameSettings.SavedQualityLevel = Enum.SavedSavedQualitySetting and Enum.SavedSavedQualitySetting.QualityLevel1 or userGameSettings.SavedQualityLevel
     end)
 end
 
@@ -281,8 +280,8 @@ local ConfigData = {
 	PlayersESP = false,
 	ItemsESP = false,
 	GloveESP = false,
-	AutoCollect = false,             -- Set to false
-	AutoCollectItemsToggle = false,  -- Set to false
+	AutoCollect = false,
+	AutoCollectItemsToggle = false,
 	AutoPickup = false,
 	SelectedAutoCollectItem = "Apple",
 	SlowGetItems = false,
@@ -509,8 +508,6 @@ local function RemoveIceCube()
 	end
 end
 
--- Updated Anti Cube of Death logic (from the newer Pumpkin Hub version).
--- It removes matching cube objects found inside Workspace.Rubbled Remains.
 local AntiCubeOfDeathEnabled = false
 
 task.spawn(function()
@@ -536,11 +533,6 @@ task.spawn(function()
 end)
 
 local GroupId = 9950771
-local SBStaff = {
-	["Trial Staff"] = true, ["Junior Staff"] = true, ["Staff"] = true, ["Senior Staff"] = true,
-	["Staff Supervisor"] = true, ["Artist"] = true, ["OVERSEER"] = true, ["BOBA"] = true,
-	["VFX"] = true, ["Builder"] = true, ["Developer"] = true, ["Lead Developer"] = true, ["Owner"] = true
-}
 
 pcall(function()
 	if ReplicatedStorage.Remotes:FindFirstChild("ModerationRemote") then ReplicatedStorage.Remotes.ModerationRemote:Destroy() end
@@ -685,6 +677,7 @@ if ConfigData.AntiLag then
 	end)
 end
 
+-- Replaced Staff Detection Logic from txt
 Game:Toggle({
 	Title = "Staff Detection",
 	Desc = "Automatically kicks you whenever a staff member is in your game.",
@@ -694,18 +687,23 @@ Game:Toggle({
 	Callback = function(Value)
 		ConfigData.StaffDetection = Value
 		SaveConfig()
-		while ConfigData.StaffDetection do
-			for i, v in pairs(Players:GetPlayers()) do
-				local role = v:GetRoleInGroup(GroupId)
-				if SBStaff[role] or (v:GetRankInGroup(GroupId) > 1) then
-					player:Kick("A staff joined the game")
-					break
-				end
-			end
-			task.wait()
-		end
 	end
 })
+
+-- High-frequency background staff detection loop from txt
+task.spawn(function()
+	while task.wait() do
+		if ConfigData.StaffDetection then
+			for _, v in ipairs(Players:GetPlayers()) do
+				pcall(function()
+					if v:GetRankInGroup(GroupId) > 1 then
+						player:Kick("[STAFF DETECTION]\n" .. v.Name .. " was in your server.")
+					end
+				end)
+			end
+		end
+	end
+end)
 
 Game:Divider()
 
@@ -951,14 +949,10 @@ RunService.RenderStepped:Connect(function()
 			local char = p.Character
 			local hum = char and char:FindFirstChildOfClass("Humanoid")
 			
-			-- Check if 0 health / dead
 			if not hum or hum.Health <= 0 then
 				table.insert(deadList, p.Name)
-				
-				-- Check if spectating local player (camera target or distance matching)
 				local cam = workspace.CurrentCamera
 				if cam and (cam.CameraSubject == humanoid or cam.CameraSubject == character) then
-					-- Extra heuristic: if their camera or character view tracks us
 					table.insert(spectatingUs, p.Name)
 				end
 			end
@@ -2250,6 +2244,7 @@ Game:Toggle({
 	end
 })
 
+--[[ Pumpkin Hub Accurate Auto Bomb Bus (Turns Off Automatically After Activates) ]]
 task.spawn(function()
 	while true do
 		if ConfigData.AutoBombBus then
@@ -2263,43 +2258,136 @@ task.spawn(function()
 						bomb:Activate()
 					end)
 				end
+				-- Automatically turn off toggle after execution
+				ConfigData.AutoBombBus = false
+				SaveConfig()
+				break
 			end
 		end
 		task.wait(0.05)
 	end
 end)
 
+--[[ Pumpkin Hub Accurate Get Items (Turns Off Automatically After Finished) ]]
+local AllowedTools = {
+	["Bomb"] = true,
+	["Potion of Strength"] = true,
+	["Bull's essence"] = true,
+	["Boba"] = true,
+	["Speed Potion"] = true,
+	["Frog Potion"] = true
+}
+
+local function GetCountdown()
+	local countdown = player.PlayerGui:FindFirstChild("Countdown")
+	local container = countdown and countdown:FindFirstChild("Countdown")
+	local timeLeft = container and container:FindFirstChild("TimeLeft")
+	if not timeLeft then return nil end
+	return tonumber(timeLeft.Text)
+end
+
+local function CountdownAllowed()
+	local value = GetCountdown()
+	return value ~= nil and value >= 1 and value <= 3
+end
+
+local function GetOrderedItems(itemsFolder)
+	local bomb = nil
+	local strengthList, bullList, bobaList, speedList, frogList = {}, {}, {}, {}, {}
+
+	for _, obj in ipairs(itemsFolder:GetChildren()) do
+		if obj:IsA("Tool") then
+			local handle = obj:FindFirstChild("Handle")
+			if handle then
+				if obj.Name == "Bomb" and not bomb then
+					bomb = obj
+				elseif obj.Name == "Potion of Strength" then
+					table.insert(strengthList, obj)
+				elseif obj.Name == "Bull's essence" then
+					table.insert(bullList, obj)
+				elseif obj.Name == "Boba" then
+					table.insert(bobaList, obj)
+				elseif obj.Name == "Speed Potion" then
+					table.insert(speedList, obj)
+				elseif obj.Name == "Frog Potion" then
+					table.insert(frogList, obj)
+				end
+			end
+		end
+	end
+
+	return { {bomb}, strengthList, bullList, bobaList, speedList, frogList }
+end
+
+local CollectionCycle = 0
+local BombTeleportedThisRound = false
+
 task.spawn(function()
-	local itemRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Item", 5)
+	local itemRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Item", 10)
 	while true do
-		local waitTime = (ConfigData.GetItemsSpeed == "Fast") and 0.4 or 1.5
-		task.wait(waitTime)
-		if ConfigData.GetItems and itemRemote then
-			pcall(function()
-				local char = player.Character
-				if char and char:FindFirstChild("HumanoidRootPart") then
-					local hrp = char.HumanoidRootPart
-					local itemsFolder = workspace:FindFirstChild("Items")
-					if itemsFolder then
-						for _, obj in ipairs(itemsFolder:GetChildren()) do
-							if not ConfigData.GetItems then break end
-							if obj:IsA("Tool") then
-								local handle = obj:FindFirstChild("Handle")
-								if handle and handle:IsA("BasePart") then
-									hrp.CFrame = handle.CFrame + Vector3.new(0, 3, 0)
-									task.wait(ConfigData.GetItemsSpeed == "Fast" and 0.2 or 0.5)
-									local id = handle:GetAttribute("ItemId") or obj:GetAttribute("ItemId")
-									if id then
-										pcall(function() itemRemote:FireServer(id) end)
-									end
-									break
+		task.wait(0.1)
+
+		if ConfigData.GetItems and CountdownAllowed() and itemRemote then
+			local char = player.Character
+			local hrp = char and char:FindFirstChild("HumanoidRootPart")
+			local itemsFolder = workspace:FindFirstChild("Items")
+
+			if hrp and itemsFolder then
+				local amount = (ConfigData.GetItemsSpeed == "Fast") and (CollectionCycle == 0 and 5 or 8) or (CollectionCycle == 0 and 2 or 4)
+				local order = GetOrderedItems(itemsFolder)
+				local picked = 0
+
+				for _, group in ipairs(order) do
+					for _, tool in ipairs(group) do
+						if picked >= amount or not ConfigData.GetItems then break end
+						if tool and tool.Parent then
+							local handle = tool:FindFirstChild("Handle")
+							if handle and handle:IsA("BasePart") then
+								hrp.CFrame = CFrame.new(handle.Position + Vector3.new(2, 0, 0), handle.Position)
+								task.wait(ConfigData.GetItemsSpeed == "Fast" and 0.2 or 0.4)
+								
+								local id = handle:GetAttribute("ItemId") or tool:GetAttribute("ItemId")
+								if id then
+									pcall(function()
+										itemRemote:FireServer(id)
+									end)
+									picked += 1
 								end
+								task.wait(ConfigData.GetItemsSpeed == "Fast" and 0.2 or 0.4)
 							end
 						end
 					end
+					if picked >= amount then break end
 				end
-			end)
+
+				if picked > 0 then
+					CollectionCycle += 1
+					task.wait(ConfigData.GetItemsSpeed == "Fast" and 5 or 8)
+				end
+
+				-- Automatically turn off Get Items after completing collection loop
+				ConfigData.GetItems = false
+				SaveConfig()
+			end
 		end
+	end
+end)
+
+-- Reset round states on match restart
+task.spawn(function()
+	local wasHigh = false
+	while true do
+		local val = GetCountdown()
+		if val and val > 3 then
+			if not wasHigh then
+				CollectionCycle = 0
+				BombTeleportedThisRound = false
+			end
+			wasHigh = true
+		else
+			wasHigh = false
+		end
+		task.wait(0.5)
 	end
 end)
 
@@ -2411,7 +2499,8 @@ RunService.RenderStepped:Connect(function()
 	if ConfigData.ItemsESP then
 		local itemsFolder = workspace:FindFirstChild("Items")
 		if itemsFolder then
-			for _, itemObj in ipairs(itemsFolder:GetChildren()) do
+			local itemsFolderChildren = itemsFolder:GetChildren()
+			for _, itemObj in ipairs(itemsFolderChildren) do
 				local part = itemObj:IsA("BasePart") and itemObj or (itemObj:IsA("Model") and (itemObj.PrimaryPart or itemObj:FindFirstChildWhichIsA("BasePart")))
 				if part then
 					local billboard = itemEspTable[itemObj]
@@ -2481,7 +2570,6 @@ task.spawn(function()
 	end
 end)
 
--- Delete All Seats: updated to match the latest Pumpkin Hub scan loop.
 task.spawn(function()
 	while true do
 		if ConfigData.DeleteSeats then
@@ -2495,8 +2583,6 @@ task.spawn(function()
 	end
 end)
 
-
--- Auto Pickup: collect items already within range; does not teleport the player.
 task.spawn(function()
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
 	local itemRemote = remotes:WaitForChild("Item", 10)
