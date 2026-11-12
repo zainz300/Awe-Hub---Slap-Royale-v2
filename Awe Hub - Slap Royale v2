@@ -190,7 +190,7 @@ local function setLowestQuality()
         if oldSavedQualityLevel == nil then
             oldSavedQualityLevel = userGameSettings.SavedQualityLevel
         end
-        userGameSettings.SavedQualityLevel = Enum.SavedSavedQualitySetting and Enum.SavedSavedQualitySetting.QualityLevel1 or userGameSettings.SavedQualityLevel
+        userGameSettings.SavedQualityLevel = Enum.SavedQualitySetting.QualityLevel1 or userGameSettings.SavedQualityLevel
     end)
 end
 
@@ -241,7 +241,7 @@ local function disableAntiLag()
     restoreQuality()
 end
 
---[[ Configuration System ]]
+--[[ Configuration System (Excluding AutoCollect, GetItems, AutoBombBus) ]]
 local ConfigFileName = "AWEHub_SlapRoyale_Config.json"
 
 local ConfigData = {
@@ -280,13 +280,13 @@ local ConfigData = {
 	PlayersESP = false,
 	ItemsESP = false,
 	GloveESP = false,
-	AutoCollect = false,
-	AutoCollectItemsToggle = false,
+	AutoCollect = false,             -- Excluded from saving/loading
+	AutoCollectItemsToggle = false,  -- Excluded from saving/loading
 	AutoPickup = false,
 	SelectedAutoCollectItem = "Apple",
 	SlowGetItems = false,
 	AutoUseItems = false,
-	AutoBombBus = false,
+	AutoBombBus = false,             -- Excluded from saving/loading
 	KillPlayer = false,
 	HideUsername = false,
 	ZoneCenterPush = false,
@@ -295,14 +295,20 @@ local ConfigData = {
 	AutoWin = false,
 	Fly = false,
 	AntiLag = false,
-	GetItems = false,
+	GetItems = false,                -- Excluded from saving/loading
 	GetItemsSpeed = "Slow",
 	SpectatorDetector = false,
 }
 
 local function SaveConfig()
+	local saveTable = {}
+	for k, v in pairs(ConfigData) do
+		if k ~= "AutoCollect" and k ~= "AutoCollectItemsToggle" and k ~= "GetItems" and k ~= "AutoBombBus" then
+			saveTable[k] = v
+		end
+	end
 	local success, encoded = pcall(function()
-		return HttpService:JSONEncode(ConfigData)
+		return HttpService:JSONEncode(saveTable)
 	end)
 	if success and writefile then
 		pcall(function()
@@ -318,8 +324,10 @@ local function LoadConfig()
 		end)
 		if success and type(decoded) == "table" then
 			for k, v in pairs(decoded) do
-				if ConfigData[k] ~= nil then
-					ConfigData[k] = v
+				if k ~= "AutoCollect" and k ~= "AutoCollectItemsToggle" and k ~= "GetItems" and k ~= "AutoBombBus" then
+					if ConfigData[k] ~= nil then
+						ConfigData[k] = v
+					end
 				end
 			end
 		end
@@ -533,6 +541,11 @@ task.spawn(function()
 end)
 
 local GroupId = 9950771
+local SBStaff = {
+	["Trial Staff"] = true, ["Junior Staff"] = true, ["Staff"] = true, ["Senior Staff"] = true,
+	["Staff Supervisor"] = true, ["Artist"] = true, ["OVERSEER"] = true, ["BOBA"] = true,
+	["VFX"] = true, ["Builder"] = true, ["Developer"] = true, ["Lead Developer"] = true, ["Owner"] = true
+}
 
 pcall(function()
 	if ReplicatedStorage.Remotes:FindFirstChild("ModerationRemote") then ReplicatedStorage.Remotes.ModerationRemote:Destroy() end
@@ -677,7 +690,6 @@ if ConfigData.AntiLag then
 	end)
 end
 
--- Replaced Staff Detection Logic from txt
 Game:Toggle({
 	Title = "Staff Detection",
 	Desc = "Automatically kicks you whenever a staff member is in your game.",
@@ -687,23 +699,18 @@ Game:Toggle({
 	Callback = function(Value)
 		ConfigData.StaffDetection = Value
 		SaveConfig()
-	end
-})
-
--- High-frequency background staff detection loop from txt
-task.spawn(function()
-	while task.wait() do
-		if ConfigData.StaffDetection then
-			for _, v in ipairs(Players:GetPlayers()) do
-				pcall(function()
-					if v:GetRankInGroup(GroupId) > 1 then
-						player:Kick("[STAFF DETECTION]\n" .. v.Name .. " was in your server.")
-					end
-				end)
+		while ConfigData.StaffDetection do
+			for i, v in pairs(Players:GetPlayers()) do
+				local role = v:GetRoleInGroup(GroupId)
+				if SBStaff[role] or (v:GetRankInGroup(GroupId) > 1) then
+					player:Kick("A staff joined the game")
+					break
+				end
 			end
+			task.wait()
 		end
 	end
-end)
+})
 
 Game:Divider()
 
@@ -2172,7 +2179,8 @@ Game:Dropdown({
 	end
 })
 
-Game:Toggle({
+local autoCollectToggleRef
+autoCollectToggleRef = Game:Toggle({
 	Title = "Auto Collect Items",
 	Desc = "Automatically collects items around the map based on selection",
 	Icon = "bird",
@@ -2181,7 +2189,7 @@ Game:Toggle({
 	Callback = function(Value)
 		ConfigData.AutoCollectItemsToggle = Value
 		ConfigData.AutoCollect = Value
-		SaveConfig()
+		-- Not saved to config as requested
 	end
 })
 
@@ -2197,7 +2205,8 @@ Game:Toggle({
 	end
 })
 
-Game:Toggle({
+local getItemsToggleRef
+getItemsToggleRef = Game:Toggle({
 	Title = "Get Items",
 	Desc = "Automatically collects useful items across the map",
 	Icon = "bird",
@@ -2205,7 +2214,7 @@ Game:Toggle({
 	Value = ConfigData.GetItems,
 	Callback = function(Value)
 		ConfigData.GetItems = Value
-		SaveConfig()
+		-- Not saved to config as requested
 	end
 })
 
@@ -2232,7 +2241,8 @@ Game:Toggle({
 	end
 })
 
-Game:Toggle({
+local autoBombBusToggleRef
+autoBombBusToggleRef = Game:Toggle({
 	Title = "Auto Bomb Bus",
 	Desc = "Automatically activates bomb after exiting bus",
 	Icon = "bird",
@@ -2240,11 +2250,11 @@ Game:Toggle({
 	Value = ConfigData.AutoBombBus,
 	Callback = function(Value)
 		ConfigData.AutoBombBus = Value
-		SaveConfig()
+		-- Not saved to config as requested
 	end
 })
 
---[[ Pumpkin Hub Accurate Auto Bomb Bus (Turns Off Automatically After Activates) ]]
+--[[ Auto Bomb Bus: Automatically turns off after execution ]]
 task.spawn(function()
 	while true do
 		if ConfigData.AutoBombBus then
@@ -2258,17 +2268,18 @@ task.spawn(function()
 						bomb:Activate()
 					end)
 				end
-				-- Automatically turn off toggle after execution
+				-- Automatically turn off after execution
 				ConfigData.AutoBombBus = false
-				SaveConfig()
-				break
+				pcall(function()
+					autoBombBusToggleRef:Set(false)
+				end)
 			end
 		end
 		task.wait(0.05)
 	end
 end)
 
---[[ Pumpkin Hub Accurate Get Items (Turns Off Automatically After Finished) ]]
+--[[ Get Items: Ordered collection based on Fast/Slow speed, auto-turns off after collection ]]
 local AllowedTools = {
 	["Bomb"] = true,
 	["Potion of Strength"] = true,
@@ -2365,9 +2376,11 @@ task.spawn(function()
 					task.wait(ConfigData.GetItemsSpeed == "Fast" and 5 or 8)
 				end
 
-				-- Automatically turn off Get Items after completing collection loop
+				-- Automatically turn off Get Items after collection cycle completes
 				ConfigData.GetItems = false
-				SaveConfig()
+				pcall(function()
+					getItemsToggleRef:Set(false)
+				end)
 			end
 		end
 	end
