@@ -190,7 +190,7 @@ local function setLowestQuality()
         if oldSavedQualityLevel == nil then
             oldSavedQualityLevel = userGameSettings.SavedQualityLevel
         end
-        userGameSettings.SavedQualityLevel = Enum.SavedQualitySetting.QualityLevel1 or userGameSettings.SavedQualityLevel
+        userGameSettings.SavedQualityLevel = Enum.SavedSavedQualitySetting ~= nil and Enum.SavedQualitySetting.QualityLevel1 or userGameSettings.SavedQualityLevel
     end)
 end
 
@@ -241,7 +241,7 @@ local function disableAntiLag()
     restoreQuality()
 end
 
---[[ Configuration System (Excluding AutoCollect, GetItems, AutoBombBus) ]]
+--[[ Configuration System ]]
 local ConfigFileName = "AWEHub_SlapRoyale_Config.json"
 
 local ConfigData = {
@@ -280,13 +280,11 @@ local ConfigData = {
 	PlayersESP = false,
 	ItemsESP = false,
 	GloveESP = false,
-	AutoCollect = false,             -- Excluded from saving/loading
-	AutoCollectItemsToggle = false,  -- Excluded from saving/loading
 	AutoPickup = false,
 	SelectedAutoCollectItem = "Apple",
 	SlowGetItems = false,
 	AutoUseItems = false,
-	AutoBombBus = false,             -- Excluded from saving/loading
+	AutoBombBus = false,
 	KillPlayer = false,
 	HideUsername = false,
 	ZoneCenterPush = false,
@@ -295,20 +293,14 @@ local ConfigData = {
 	AutoWin = false,
 	Fly = false,
 	AntiLag = false,
-	GetItems = false,                -- Excluded from saving/loading
+	GetItems = false,
 	GetItemsSpeed = "Slow",
 	SpectatorDetector = false,
 }
 
 local function SaveConfig()
-	local saveTable = {}
-	for k, v in pairs(ConfigData) do
-		if k ~= "AutoCollect" and k ~= "AutoCollectItemsToggle" and k ~= "GetItems" and k ~= "AutoBombBus" then
-			saveTable[k] = v
-		end
-	end
 	local success, encoded = pcall(function()
-		return HttpService:JSONEncode(saveTable)
+		return HttpService:JSONEncode(ConfigData)
 	end)
 	if success and writefile then
 		pcall(function()
@@ -324,10 +316,8 @@ local function LoadConfig()
 		end)
 		if success and type(decoded) == "table" then
 			for k, v in pairs(decoded) do
-				if k ~= "AutoCollect" and k ~= "AutoCollectItemsToggle" and k ~= "GetItems" and k ~= "AutoBombBus" then
-					if ConfigData[k] ~= nil then
-						ConfigData[k] = v
-					end
+				if ConfigData[k] ~= nil then
+					ConfigData[k] = v
 				end
 			end
 		end
@@ -2175,12 +2165,11 @@ Game:Dropdown({
 	Value = ConfigData.SelectedAutoCollectItem,
 	Callback = function(Selected)
 		ConfigData.SelectedAutoCollectItem = Selected
-		SaveConfig()
+		-- Not saved in config as requested
 	end
 })
 
-local autoCollectToggleRef
-autoCollectToggleRef = Game:Toggle({
+Game:Toggle({
 	Title = "Auto Collect Items",
 	Desc = "Automatically collects items around the map based on selection",
 	Icon = "bird",
@@ -2189,7 +2178,7 @@ autoCollectToggleRef = Game:Toggle({
 	Callback = function(Value)
 		ConfigData.AutoCollectItemsToggle = Value
 		ConfigData.AutoCollect = Value
-		-- Not saved to config as requested
+		-- Not saved in config as requested
 	end
 })
 
@@ -2205,8 +2194,9 @@ Game:Toggle({
 	end
 })
 
-local getItemsToggleRef
-getItemsToggleRef = Game:Toggle({
+local GetItemsToggleRef -- Reference to toggle UI object for auto-disabling
+
+GetItemsToggleRef = Game:Toggle({
 	Title = "Get Items",
 	Desc = "Automatically collects useful items across the map",
 	Icon = "bird",
@@ -2214,17 +2204,31 @@ getItemsToggleRef = Game:Toggle({
 	Value = ConfigData.GetItems,
 	Callback = function(Value)
 		ConfigData.GetItems = Value
-		-- Not saved to config as requested
+		SaveConfig()
 	end
 })
 
 Game:Dropdown({
 	Title = "Get Items Speed",
-	Desc = "Select collection speed tier",
+	Desc = "⚠️ DISCLAIMER: To bomb the bus, have Auto Bomb Bus enabled AND make sure Slow is selected for Get Items Speed! 🚍 💣",
 	Values = {"Slow", "Fast"},
 	Value = ConfigData.GetItemsSpeed,
 	Callback = function(Selected)
 		ConfigData.GetItemsSpeed = Selected
+		SaveConfig()
+	end
+})
+
+local AutoBombBusToggleRef -- Reference to toggle UI object for auto-disabling
+
+AutoBombBusToggleRef = Game:Toggle({
+	Title = "Auto Bomb Bus",
+	Desc = "Automatically activates bomb after exiting bus",
+	Icon = "bird",
+	Type = "Checkbox",
+	Value = ConfigData.AutoBombBus,
+	Callback = function(Value)
+		ConfigData.AutoBombBus = Value
 		SaveConfig()
 	end
 })
@@ -2241,20 +2245,7 @@ Game:Toggle({
 	end
 })
 
-local autoBombBusToggleRef
-autoBombBusToggleRef = Game:Toggle({
-	Title = "Auto Bomb Bus",
-	Desc = "Automatically activates bomb after exiting bus",
-	Icon = "bird",
-	Type = "Checkbox",
-	Value = ConfigData.AutoBombBus,
-	Callback = function(Value)
-		ConfigData.AutoBombBus = Value
-		-- Not saved to config as requested
-	end
-})
-
---[[ Auto Bomb Bus: Automatically turns off after execution ]]
+--[[ Pumpkin Hub Accurate Auto Bomb Bus (Turns off automatically after execution) ]]
 task.spawn(function()
 	while true do
 		if ConfigData.AutoBombBus then
@@ -2268,10 +2259,14 @@ task.spawn(function()
 						bomb:Activate()
 					end)
 				end
-				-- Automatically turn off after execution
+				
+				-- Turn off Auto Bomb Bus automatically after finishing
 				ConfigData.AutoBombBus = false
+				SaveConfig()
 				pcall(function()
-					autoBombBusToggleRef:Set(false)
+					if AutoBombBusToggleRef and AutoBombBusToggleRef.Set then
+						AutoBombBusToggleRef:Set(false)
+					end
 				end)
 			end
 		end
@@ -2279,57 +2274,7 @@ task.spawn(function()
 	end
 end)
 
---[[ Get Items: Ordered collection based on Fast/Slow speed, auto-turns off after collection ]]
-local AllowedTools = {
-	["Bomb"] = true,
-	["Potion of Strength"] = true,
-	["Bull's essence"] = true,
-	["Boba"] = true,
-	["Speed Potion"] = true,
-	["Frog Potion"] = true
-}
-
-local function GetCountdown()
-	local countdown = player.PlayerGui:FindFirstChild("Countdown")
-	local container = countdown and countdown:FindFirstChild("Countdown")
-	local timeLeft = container and container:FindFirstChild("TimeLeft")
-	if not timeLeft then return nil end
-	return tonumber(timeLeft.Text)
-end
-
-local function CountdownAllowed()
-	local value = GetCountdown()
-	return value ~= nil and value >= 1 and value <= 3
-end
-
-local function GetOrderedItems(itemsFolder)
-	local bomb = nil
-	local strengthList, bullList, bobaList, speedList, frogList = {}, {}, {}, {}, {}
-
-	for _, obj in ipairs(itemsFolder:GetChildren()) do
-		if obj:IsA("Tool") then
-			local handle = obj:FindFirstChild("Handle")
-			if handle then
-				if obj.Name == "Bomb" and not bomb then
-					bomb = obj
-				elseif obj.Name == "Potion of Strength" then
-					table.insert(strengthList, obj)
-				elseif obj.Name == "Bull's essence" then
-					table.insert(bullList, obj)
-				elseif obj.Name == "Boba" then
-					table.insert(bobaList, obj)
-				elseif obj.Name == "Speed Potion" then
-					table.insert(speedList, obj)
-				elseif obj.Name == "Frog Potion" then
-					table.insert(frogList, obj)
-				end
-			end
-		end
-	end
-
-	return { {bomb}, strengthList, bullList, bobaList, speedList, frogList }
-end
-
+--[[ Pumpkin Hub Accurate Get Items (Turns off automatically after collection cycle completes) ]]
 local CollectionCycle = 0
 local BombTeleportedThisRound = false
 
@@ -2375,11 +2320,14 @@ task.spawn(function()
 					CollectionCycle += 1
 					task.wait(ConfigData.GetItemsSpeed == "Fast" and 5 or 8)
 				end
-
-				-- Automatically turn off Get Items after collection cycle completes
+				
+				-- Turn off Get Items automatically after finishing collection
 				ConfigData.GetItems = false
+				SaveConfig()
 				pcall(function()
-					getItemsToggleRef:Set(false)
+					if GetItemsToggleRef and GetItemsToggleRef.Set then
+						GetItemsToggleRef:Set(false)
+					end
 				end)
 			end
 		end
