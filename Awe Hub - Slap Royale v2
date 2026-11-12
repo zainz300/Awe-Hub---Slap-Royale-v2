@@ -2210,7 +2210,7 @@ GetItemsToggleRef = Game:Toggle({
 
 Game:Dropdown({
 	Title = "Get Items Speed",
-	Desc = "⚠️ DISCLAIMER: To bomb the bus, have Auto Bomb Bus enabled AND make sure Slow is selected for Get Items Speed! 🚍 💣",
+	Desc = "⚠️ To bomb the bus, have these 2 features on: Auto Bomb Bus AND make sure Slow is selected for Get Items Speed! 🚍 💣",
 	Values = {"Slow", "Fast"},
 	Value = ConfigData.GetItemsSpeed,
 	Callback = function(Selected)
@@ -2273,6 +2273,68 @@ task.spawn(function()
 		task.wait(0.05)
 	end
 end)
+
+--[[ Pumpkin Hub Accurate Get Items Helper Functions ]]
+local function GetCountdownObject()
+	local countdown = player.PlayerGui:FindFirstChild("Countdown")
+	local container = countdown and countdown:FindFirstChild("Countdown")
+	return container and container:FindFirstChild("TimeLeft")
+end
+
+local function GetCountdown()
+	local obj = GetCountdownObject()
+	if not obj then return nil end
+	return tonumber(obj.Text)
+end
+
+local function CountdownAllowed()
+	local value = GetCountdown()
+	return value ~= nil and value >= 1 and value <= 3
+end
+
+local AllowedTools = {
+	["Bomb"] = true,
+	["Potion of Strength"] = true,
+	["Bull's essence"] = true,
+	["Boba"] = true,
+	["Speed Potion"] = true,
+	["Frog Potion"] = true
+}
+
+local function GetOrderedItems(itemsFolder)
+	local bomb = nil
+	local strengthList, bullList, bobaList, speedList, frogList = {}, {}, {}, {}, {}
+
+	for _, obj in ipairs(itemsFolder:GetChildren()) do
+		if obj:IsA("Tool") and AllowedTools[obj.Name] then
+			local handle = obj:FindFirstChild("Handle")
+			if handle then
+				if obj.Name == "Bomb" and not BombTeleportedThisRound and not bomb then
+					bomb = obj
+				elseif obj.Name == "Potion of Strength" then
+					table.insert(strengthList, obj)
+				elseif obj.Name == "Bull's essence" then
+					table.insert(bullList, obj)
+				elseif obj.Name == "Boba" then
+					table.insert(bobaList, obj)
+				elseif obj.Name == "Speed Potion" then
+					table.insert(speedList, obj)
+				elseif obj.Name == "Frog Potion" then
+					table.insert(frogList, obj)
+				end
+			end
+		end
+	end
+
+	return {
+		{bomb},
+		strengthList,
+		bullList,
+		bobaList,
+		speedList,
+		frogList
+	}
+end
 
 --[[ Pumpkin Hub Accurate Get Items (Turns off automatically after collection cycle completes) ]]
 local CollectionCycle = 0
