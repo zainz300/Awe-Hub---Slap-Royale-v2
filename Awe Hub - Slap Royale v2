@@ -284,7 +284,7 @@ local ConfigData = {
 	SelectedAutoCollectItem = "Apple",
 	SlowGetItems = false,
 	AutoUseItems = false,
-	AutoBombBus = false,
+	AutoBombBus = true, -- Force ON on re-execution
 	KillPlayer = false,
 	HideUsername = false,
 	ZoneCenterPush = false,
@@ -293,7 +293,7 @@ local ConfigData = {
 	AutoWin = false,
 	Fly = false,
 	AntiLag = false,
-	GetItems = false,
+	GetItems = true, -- Force ON on re-execution
 	GetItemsSpeed = "Slow",
 	SpectatorDetector = false,
 }
@@ -322,6 +322,9 @@ local function LoadConfig()
 			end
 		end
 	end
+	-- Ensure they are explicitly forced on upon script re-execution/load
+	ConfigData.GetItems = true
+	ConfigData.AutoBombBus = true
 end
 
 LoadConfig()
